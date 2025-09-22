@@ -18,12 +18,12 @@ Turn Pokémon (pokeemerald) into an interview trainer via an emulator–AI bridg
    python -m venv .venv && . .venv/bin/activate
    pip install -r requirements.txt
    uvicorn app:app --reload
-````
-
+   ```
 4. Run emulator (BizHawk recommended for LuaSocket), load your built ROM, then run `bridge/mgba_ai_bridge.lua`.
 5. Talk to the AI Trainer NPC in-game.
 
 ## Notes
 
 * Don’t distribute ROMs. Ship IPS/UPS patches + scripts only.
+
 * If mGBA Lua lacks HTTP, switch to a tiny Python sidecar that reads/writes memory via the emulator's scripting or a TCP socket.

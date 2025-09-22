@@ -1,3 +1,4 @@
 [submodule "romhack/pokeemerald"]
 	path = romhack/pokeemerald
 	url = https://github.com/pret/pokeemerald.git
+	ignore = dirty

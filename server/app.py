@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+# ---- prompts ----
 PROMPTS = {p["id"]: p for p in json.loads(Path(__file__).with_name("prompts.json").read_text())}
 
 app = FastAPI()
@@ -22,6 +23,13 @@ class AIResponse(BaseModel):
     hint: Optional[str] = None
     next_state: Optional[str] = None
 
+def append_log(line: str) -> None:
+    log_dir = Path.home() / "pokemon-career" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{datetime.now():%Y-%m-%d}.md"
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
 def grade(prompt, user_answer: Optional[str]) -> tuple[bool, Optional[str]]:
     if not user_answer:
         return False, prompt["hints"][0] if prompt.get("hints") else None
@@ -34,14 +42,12 @@ def grade(prompt, user_answer: Optional[str]) -> tuple[bool, Optional[str]]:
 def ai(req: AIRequest):
     prompt = PROMPTS.get(req.prompt_id) or next(iter(PROMPTS.values()))
     passed, hint = grade(prompt, req.answer)
-    text = prompt["question"] if (req.attempt == 1 and not req.answer) else \
-           ("✅ Correct! Nice work." if passed else "Not quite. Think about constant-time membership checks.")
-    # simple log
-    log_dir = Path.home() / "pokemon-career" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    (log_dir / f"{datetime.now():%Y-%m-%d}.md").write_text(
-        f"{datetime.now():%H:%M:%S} | {req.prompt_id} | attempt={req.attempt} | passed={passed} | ans={req.answer}\n",
-        append=True
-    ) if hasattr(Path, "write_text") else None
+
+    if req.attempt == 1 and not req.answer:
+        text = prompt["question"]
+    else:
+        text = "✅ Correct! Nice work." if passed else "Not quite. Think about constant-time membership checks."
+
+    append_log(f"{datetime.now():%H:%M:%S} | {req.prompt_id} | attempt={req.attempt} | passed={passed} | ans={req.answer}")
 
     return AIResponse(text=text, passed=passed, hint=hint, next_state="done" if passed else "retry")

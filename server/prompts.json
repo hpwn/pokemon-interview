@@ -1,0 +1,13 @@
+[
+  {
+    "id": "ARR_001",
+    "topic": "Arrays & Hashing",
+    "question": "Given an array of integers, return true if any value appears at least twice in the array, and return false if every element is distinct.",
+    "keywords": ["set", "hash", "O(n)", "duplicate"],
+    "hints": [
+      "What data structure can give you O(1) membership checks?",
+      "Try scanning the array and tracking what you've seen."
+    ],
+    "max_attempts": 3
+  }
+]

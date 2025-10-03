@@ -1,13 +1,39 @@
 [
   {
-    "id": "ARR_001",
+    "id": "MCQ_001",
+    "topic": "Data Structures",
+    "type": "mcq",
+    "question": "Which approach detects duplicates in O(n) expected time?",
+    "choices": ["Sort then scan", "Use a hash set while scanning", "Nested loops"],
+    "answer_idx": 1,
+    "hints": ["Think average-case constant-time membership checks."],
+    "max_attempts": 2
+  },
+  {
+    "id": "TF_001",
+    "topic": "Complexity",
+    "type": "tf",
+    "question": "True/False: A hash set can give O(1) worst-case lookup time.",
+    "answer_bool": false,
+    "hints": ["Consider adversarial keys."],
+    "max_attempts": 1
+  },
+  {
+    "id": "SHORT_001",
+    "topic": "Behavioral",
+    "type": "short",
+    "question": "Give the 'Action' sentence (STAR) you took in a team conflict.",
+    "keywords": ["I did", "I led", "I decided", "I implemented"],
+    "hints": ["Start with 'I ...' and be specific."],
+    "max_attempts": 2
+  },
+  {
+    "id": "CODE_001",
     "topic": "Arrays & Hashing",
-    "question": "Given an array of integers, return true if any value appears at least twice in the array, and return false if every element is distinct.",
-    "keywords": ["set", "hash", "O(n)", "duplicate"],
-    "hints": [
-      "What data structure can give you O(1) membership checks?",
-      "Try scanning the array and tracking what you've seen."
-    ],
-    "max_attempts": 3
+    "type": "code",
+    "question": "In Python/JS/Go, outline a function that returns true if an array has duplicates in O(n) time.",
+    "keywords": ["set", "hash", "seen", "O(n)"],
+    "hints": ["Track seen elements as you scan."],
+    "max_attempts": 2
   }
 ]

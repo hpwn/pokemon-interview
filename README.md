@@ -8,19 +8,34 @@ Turn Pokémon (pokeemerald) into an interview trainer via an emulator–AI bridg
 - **Lua (BizHawk or mGBA)**: watches RAM, calls local FastAPI, writes reply back into RAM.
 - **FastAPI server**: serves prompts, hints, and a simple keyword rubric.
 
-## Quick start
+## Quick start (expansion)
 
-1. Build `pokeemerald` normally (see upstream README). Put `data/scripts/ai_trainer.pory` into your scripts and include it.
-2. Pick a mailbox region in EWRAM (default stub: `0x03005C00`) and/or expose `VAR_AI_*` addresses. Update the Lua file accordingly.
-3. Start API:
+1. Submodule: `pokeemerald-expansion` (already wired). Apply overrides:
+   ```bash
+   ./romhack/apply_overrides.sh
+   ```
+
+2. Build tools then ROM (WSL/Ubuntu):
+
+   ```bash
+   cd romhack/pokeemerald
+   make clean
+   make tools -j
+   make MODERN=1 -j
+   ```
+
+   ROM: `romhack/pokeemerald/pokeemerald.gba`
+3. API:
+
    ```bash
    cd server
-   python -m venv .venv && . .venv/bin/activate
-   pip install -r requirements.txt
+   source .venv/bin/activate
    uvicorn app:app --reload
    ```
-4. Run emulator (BizHawk recommended for LuaSocket), load your built ROM, then run `bridge/mgba_ai_bridge.lua`.
-5. Talk to the AI Trainer NPC in-game.
+4. Emulator: BizHawk → load ROM → Tools → Lua Console → open `bridge/bizhawk_ai_bridge.lua`.
+
+   * Press **K** to inject a test request.
+   * Dialog appears for MCQ/TF/Short/Code → answer → in-game mailbox gets response.
 
 ## Notes
 

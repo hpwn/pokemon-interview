@@ -1,171 +1,221 @@
--- BizHawk-safe Lua: .NET WebClient + IWRAM offsets + WinForms input
--- Inputs supported: mcq/tf via dialog, short/code via TextBox.
--- Dev hotkey K injects a test request.
+-- BizHawk-safe AI bridge with HTTP fallbacks (http -> LuaSocket -> curl.exe)
+-- Shows ticks so you know it's alive; safe in IWRAM on GBA.
 
--- ===== CONFIG =====
-local MAILBOX_ADDR = 0x03005C00  -- IWRAM base region for mailbox
-local DOMAIN       = "IWRAM"
-local DOMAIN_BASE  = 0x03000000
-local ANSWER_MAX   = 200   -- allow longer text answers
-local RESP_MAX     = 120
-local API_URL      = "http://127.0.0.1:8000/ai"
+--------------------------------------
+-- Config
+--------------------------------------
+local MAILBOX_ADDR = 0x03005C00   -- absolute GBA addr we picked
+local ANSWER_MAX   = 64
+local RESP_MAX     = 60
+local API_URL      = "http://192.168.0.160:8000/ai"
 
--- ===== Domain helpers =====
-local function dom_size() return memory.getmemorydomainsize(DOMAIN) end
-local function to_off(addr) return addr - DOMAIN_BASE end
-local function in_range(off) return off >= 0 and off < dom_size() end
-local function rb_addr(addr) local off=to_off(addr); if not in_range(off) then return 0 end; return memory.read_u8(off, DOMAIN) end
-local function wb_addr(addr, v) local off=to_off(addr); if not in_range(off) then return end; memory.write_u8(off, v, DOMAIN) end
-local function rbytes(addr,n) local t={}; for i=0,n-1 do t[#t+1]=string.char(rb_addr(addr+i)) end; return table.concat(t) end
-local function wbytes(addr,s) for i=1,#s do wb_addr(addr+(i-1), s:byte(i)) end end
-local function zstrip(s) return (s or ""):gsub("\0+$","") end
-local function clear(addr,n) for i=0,n-1 do wb_addr(addr+i,0) end end
+local PROMPT_IDS = {
+  [1] = "ARR_001",
+}
 
--- ===== .NET interop =====
-if not luanet then luanet = require("luanet") end
-local WebClient = luanet.import_type('System.Net.WebClient')
-local Encoding  = luanet.import_type('System.Text.Encoding')
-local Form      = luanet.import_type('System.Windows.Forms.Form')
-local Label     = luanet.import_type('System.Windows.Forms.Label')
-local Button    = luanet.import_type('System.Windows.Forms.Button')
-local TextBox   = luanet.import_type('System.Windows.Forms.TextBox')
-local CheckedListBox = luanet.import_type('System.Windows.Forms.CheckedListBox')
-local DialogResult  = luanet.import_type('System.Windows.Forms.DialogResult')
-local DockStyle  = luanet.import_type('System.Windows.Forms.DockStyle')
-
-local function http_post_json(url, body)
-  local wc = WebClient()
-  wc.Headers["Content-Type"] = "application/json"
-  local bytes = wc:UploadData(url, "POST", Encoding.UTF8:GetBytes(body))
-  return 200, Encoding.UTF8:GetString(bytes)
-end
-
-local function json_escape(s) s=s or ""; s=s:gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n'):gsub('\r','\\r'); return s end
-local function make_body(tbl)
-  local parts = {}
-  local function add(k,v)
-    if v==nil then return end
-    local val = (type(v)=="string") and ('"'..json_escape(v)..'"') or tostring(v)
-    parts[#parts+1] = '"'..k..'":'..val
+--------------------------------------
+-- Memory helpers (BizHawk)
+--------------------------------------
+local function set_domain_iwram()
+  if not memory.usememorydomain then
+    error("This script expects BizHawk (memory.usememorydomain).")
   end
-  add("prompt_id", tbl.prompt_id)
-  add("attempt", tbl.attempt or 1)
-  add("answer_text", tbl.answer_text)
-  add("answer_idx", tbl.answer_idx)
-  if tbl.answer_bool ~= nil then add("answer_bool", tbl.answer_bool and "true" or "false") end
-  return "{"..table.concat(parts, ",").."}"
-end
-local function parse_json_value(body, key)
-  return (body or ""):match('"'..key..'"%s*:%s*"([^"]*)"')
-end
-local function parse_choices(body)
-  local arr = {}
-  local section = (body or ""):match('"choices"%s*:%s*%[(.-)%]')
-  if not section then return nil end
-  for s in section:gmatch('"(.-)"') do arr[#arr+1] = s end
-  return arr
+  memory.usememorydomain("IWRAM")
 end
 
--- ===== UI Widgets =====
-local function show_textbox(title, prompt, initial)
-  local f = Form()
-  f.Text = title
-  f.Width = 600; f.Height = 240
-  local lbl = Label(); lbl.Text = prompt; lbl.Dock = DockStyle.Top; lbl.Height = 60
-  local tb = TextBox(); tb.Multiline = true; tb.Dock = DockStyle.Fill; tb.Text = initial or ""
-  local ok = Button(); ok.Text = "OK"; ok.Dock = DockStyle.Bottom
-  local cancel = Button(); cancel.Text = "Cancel"; cancel.Dock = DockStyle.Bottom
-  local result = nil
-  ok.Click:Add(function() result = tb.Text; f:Close() end)
-  cancel.Click:Add(function() result = nil; f:Close() end)
-  f.Controls:Add(tb); f.Controls:Add(ok); f.Controls:Add(cancel); f.Controls:Add(lbl)
-  f:ShowDialog()
-  return result
+local function rb_off(base, off) return memory.read_u8(base + off) end
+local function wb_off(base, off, v) memory.write_u8(base + off, v) end
+
+local function rbytes_off(base, off, n)
+  local t = {}
+  for i = 0, n - 1 do
+    t[#t + 1] = string.char(rb_off(base, off + i))
+  end
+  return table.concat(t)
 end
 
-local function show_mcq(title, prompt, choices, allow_tf_bool)
-  local f = Form(); f.Text = title; f.Width=500; f.Height=360
-  local lbl = Label(); lbl.Text = prompt; lbl.Dock=DockStyle.Top; lbl.Height=60
-  local clb = CheckedListBox(); clb.Dock = DockStyle.Fill
-  for i,c in ipairs(choices or {"True","False"}) do clb.Items:Add(c) end
-  clb.CheckOnClick = true
-  local ok = Button(); ok.Text="OK"; ok.Dock=DockStyle.Bottom
-  local cancel = Button(); cancel.Text="Cancel"; cancel.Dock=DockStyle.Bottom
-  local idx = nil
-  ok.Click:Add(function()
-    for i=0, clb.Items.Count-1 do
-      if clb:GetItemChecked(i) then idx = i; break end
+local function wbytes_off(base, off, s)
+  for i = 1, #s do
+    memory.write_u8(base + off + (i - 1), s:byte(i))
+  end
+end
+
+local function zstrip(s) return (s or ""):gsub("\0+$", "") end
+
+--------------------------------------
+-- HTTP helpers (3 fallbacks)
+--------------------------------------
+local have_bizhawk_http = (type(http) == "table" and (http.get or http.post))
+
+local have_luasocket = false
+local socket_http, ltn12
+do
+  local ok1, mod1 = pcall(require, "socket.http")
+  local ok2, mod2 = pcall(require, "ltn12")
+  if ok1 and ok2 then
+    socket_http = mod1
+    ltn12 = mod2
+    have_luasocket = true
+  end
+end
+
+local function post_via_http(url, body)
+  -- BizHawk's 'http' module shape varies; try the common post signature.
+  if not have_bizhawk_http then return nil, "no http module" end
+  local ok, resp = pcall(function()
+    if http.post then
+      return http.post(url, body, { ["Content-Type"] = "application/json" })
+    elseif http.request then
+      return http.request({ url = url, method = "POST", data = body, headers = { ["Content-Type"] = "application/json" } })
     end
-    f:Close()
   end)
-  cancel.Click:Add(function() idx = nil; f:Close() end)
-  f.Controls:Add(clb); f.Controls:Add(ok); f.Controls:Add(cancel); f.Controls:Add(lbl)
-  f:ShowDialog()
-  if allow_tf_bool and choices == nil then
-    if idx == 0 then return nil, true
-    elseif idx == 1 then return nil, false
+  if not ok then return nil, tostring(resp) end
+  -- Some versions return {statusCode=..., text=...}; others just text
+  if type(resp) == "table" then
+    return tonumber(resp.statusCode or resp.status or 200) or 200, tostring(resp.text or resp.body or "")
+  else
+    return 200, tostring(resp)
+  end
+end
+
+local function post_via_luasocket(url, body)
+  if not have_luasocket then return nil, "no luasocket" end
+  local resp_t = {}
+  local code, code_str = socket_http.request{
+    url = url,
+    method = "POST",
+    headers = { ["Content-Type"] = "application/json",
+                ["Content-Length"] = tostring(#body) },
+    source = ltn12.source.string(body),
+    sink = ltn12.sink.table(resp_t)
+  }
+  if not code then return nil, tostring(code_str) end
+  return tonumber(code) or 0, table.concat(resp_t)
+end
+
+local function esc(s)
+  -- escape for cmd.exe
+  s = s:gsub('"', '\\"')
+  return '"' .. s .. '"'
+end
+
+local function post_via_curl(url, body)
+  -- Windows 10+ has curl.exe in PATH
+  local cmd = 'curl -s -S -o - -w "\\nHTTPSTATUS:%{http_code}" -X POST -H "Content-Type: application/json" --data ' ..
+              esc(body) .. " " .. esc(url)
+  local pipe = io.popen(cmd, "r")
+  if not pipe then return nil, "popen failed" end
+  local out = pipe:read("*a") or ""
+  pipe:close()
+  local body_part, status = out:match("^(.*)HTTPSTATUS:(%d+)%s*$")
+  if not body_part then return nil, "curl parse fail" end
+  return tonumber(status) or 0, body_part
+end
+
+local function to_json(tbl)
+  -- tiny JSON encoder for our simple payload
+  local function enc(v)
+    local t = type(v)
+    if t == "string" then
+      return '"' .. v:gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n') .. '"'
+    elseif t == "number" then
+      return tostring(v)
+    elseif t == "boolean" then
+      return v and "true" or "false"
+    elseif t == "table" then
+      local parts = {}
+      local is_array = (next(v) == 1) -- cheap guess
+      if is_array then
+        for i=1,#v do parts[#parts+1] = enc(v[i]) end
+        return "[" .. table.concat(parts, ",") .. "]"
+      else
+        for k,val in pairs(v) do
+          parts[#parts+1] = '"' .. tostring(k) .. '":' .. enc(val)
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+      end
+    else
+      return "null"
     end
   end
-  return idx, nil
+  return enc(tbl)
 end
 
-print(string.format("AI bridge (expansion) started. Domain=%s base=%08X size=%d",
-  DOMAIN, DOMAIN_BASE, dom_size()))
-
--- Dev hotkey
-local function inject_test_request()
-  clear(MAILBOX_ADDR, 256)
-  wb_addr(MAILBOX_ADDR + 1, 1)   -- prompt idx (server will map by id)
-  wb_addr(MAILBOX_ADDR + 2, 1)   -- attempt
-  wb_addr(MAILBOX_ADDR + 3, 0)   -- answer_len
-  wb_addr(MAILBOX_ADDR + 0, 1)   -- flag=1
-  print("Injected test request.")
+local function post_json(url, tbl)
+  local body = to_json(tbl)
+  -- try BizHawk http
+  if have_bizhawk_http then
+    local code, text = post_via_http(url, body)
+    if code then return code, text end
+  end
+  -- try LuaSocket
+  if have_luasocket then
+    local code, text = post_via_luasocket(url, body)
+    if code then return code, text end
+  end
+  -- fallback: curl.exe
+  local code, text = post_via_curl(url, body)
+  if code then return code, text end
+  return -1, "No HTTP client available"
 end
 
+--------------------------------------
+-- Startup
+--------------------------------------
+set_domain_iwram()
+local DOMAIN = memory.getcurrentmemorydomain()
+local base
+if DOMAIN == "IWRAM" then base = 0x03000000
+elseif DOMAIN == "EWRAM" then base = 0x02000000
+else base = 0 end
+
+local mbox_off = MAILBOX_ADDR - base
+console.clear()
+console.log(string.format(
+  "AI bridge started. Domain=%s base=%08X mailbox=%08X (offset %d) RESP_MAX=%d",
+  DOMAIN, base, MAILBOX_ADDR, mbox_off, RESP_MAX))
+
+-- simple tick so we know it’s alive
+local tick = 0
+local function heartbeat()
+  tick = tick + 1
+  if tick % 120 == 0 then
+    console.log("bridge tick " .. tick)
+  end
+end
+
+--------------------------------------
+-- Main loop
+--------------------------------------
 while true do
-  local keys = input and input.get and input.get() or {}
-  if keys["K"] then inject_test_request() end
-
-  local flag = rb_addr(MAILBOX_ADDR + 0)
+  -- read flag
+  local flag = rb_off(mbox_off, 0)
   if flag == 1 then
-    local pidx    = rb_addr(MAILBOX_ADDR + 1)
-    local attempt = rb_addr(MAILBOX_ADDR + 2)
-    -- First post to fetch question (+ choices)
-    local req0 = make_body({ prompt_id = "MCQ_001", attempt = attempt }) -- default if ROM didn't set id
-    local ok0, code0, body0 = pcall(function() local wc=WebClient(); wc.Headers["Content-Type"]="application/json"; local b=wc:UploadData(API_URL,"POST",Encoding.UTF8:GetBytes(req0)); return 200, Encoding.UTF8:GetString(b) end)
-    local qtext = parse_json_value(ok0 and body0 or "", "text") or "Question"
-    local choices = parse_choices(ok0 and body0 or "")
+    local pidx    = rb_off(mbox_off, 1)
+    local attempt = rb_off(mbox_off, 2)
+    local ans_len = math.min(rb_off(mbox_off, 3), ANSWER_MAX)
+    local answer  = zstrip(rbytes_off(mbox_off, 4, ans_len))
+    local pid     = PROMPT_IDS[pidx] or "ARR_001"
 
-    -- Decide input modality: if choices -> mcq/tf; else -> textbox
-    local answer_idx, answer_bool, answer_text = nil, nil, nil
-    if choices and #choices > 0 then
-      answer_idx, answer_bool = show_mcq("Trainer Question", qtext, choices, false)
+    local payload = { prompt_id = pid, attempt = attempt, answer = answer }
+    local code, body = post_json(API_URL, payload)
+    local reply = "Server?"
+    if code == 200 and body then
+      local txt = body:match('"text"%s*:%s*"([^"]+)"')
+      reply = txt or "OK"
     else
-      -- try TF if no explicit choices but question looks T/F
-      if qtext:lower():match("^true/false") or qtext:lower():match("true or false") then
-        _, answer_bool = show_mcq("True / False", qtext, {"True","False"}, true)
-      else
-        answer_text = show_textbox("Short/Code Answer", qtext, "")
-      end
+      reply = "API error " .. tostring(code)
+      if body and #body > 0 then reply = reply .. " (" .. body:gsub("[%c]"," "):sub(1,120) .. ")" end
     end
-
-    -- Second post with answer
-    local req1 = make_body({
-      prompt_id = "MCQ_001",  -- keep consistent for MVP; ROM can set later
-      attempt = attempt + 1,
-      answer_text = answer_text,
-      answer_idx = answer_idx,
-      answer_bool = answer_bool
-    })
-    local ok1, code1, body1 = pcall(function() local wc=WebClient(); wc.Headers["Content-Type"]="application/json"; local b=wc:UploadData(API_URL,"POST",Encoding.UTF8:GetBytes(req1)); return 200, Encoding.UTF8:GetString(b) end)
-    local reply = parse_json_value(ok1 and body1 or "", "text") or "OK"
 
     if #reply > RESP_MAX then reply = reply:sub(1, RESP_MAX) end
-    clear(MAILBOX_ADDR + 68, 140)
-    wbytes(MAILBOX_ADDR + 68, reply)
-    wb_addr(MAILBOX_ADDR + 0, 2) -- response ready
-    print("AI reply written.")
+    wbytes_off(mbox_off, 68, reply)
+    wb_off(mbox_off, 0, 2) -- response ready
+    console.log(string.format(
+      "Processed pidx=%d pid=%s attempt=%d -> code=%s reply='%s'",
+      pidx, pid, attempt, tostring(code), reply))
   end
 
+  heartbeat()
   emu.frameadvance()
 end

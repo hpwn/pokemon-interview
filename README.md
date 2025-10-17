@@ -1,12 +1,16 @@
 # Pokémon Interview Trainer (MVP)
 
-Turn Pokémon (pokeemerald) into an interview trainer via an emulator–AI bridge.
+Turn Pokémon (pokeemerald-expansion) into an interview trainer via an emulator–AI bridge.
 
 ## Architecture
 
-- **ROM (pokeemerald + Poryscript)**: an NPC sets a "mailbox" in RAM and shows "Connecting...".
+- **ROM (pokeemerald-expansion + Poryscript)**: an NPC sets a "mailbox" in RAM and shows "Connecting...".
 - **Lua (BizHawk or mGBA)**: watches RAM, calls local FastAPI, writes reply back into RAM.
 - **FastAPI server**: serves prompts, hints, and a simple keyword rubric.
+
+## Why pokeemerald-expansion?
+
+We target the `rh-hideout/pokeemerald-expansion` fork to leverage its MODERN build path, richer scripting APIs, and expanded constants—critical for our AI-driven mailbox events. The upstream project also keeps pace with modern devkitARM toolchains, making automation easier on CI and fresh developer machines.
 
 ## Quick start (expansion)
 
@@ -28,9 +32,7 @@ Turn Pokémon (pokeemerald) into an interview trainer via an emulator–AI bridg
 3. API:
 
    ```bash
-   cd server
-   source .venv/bin/activate
-   uvicorn app:app --reload
+   ./scripts/dev-up.sh
    ```
 4. Emulator: BizHawk → load ROM → Tools → Lua Console → open `bridge/bizhawk_ai_bridge.lua`.
 

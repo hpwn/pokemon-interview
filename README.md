@@ -24,7 +24,7 @@ Turn Pokémon (pokeemerald-expansion) into an interview trainer via an emulator�
    make MODERN=1 -j
    ```
 
-   ROM: `romhack/pokeemerald-expansion/pokeemerald.gba`
+   After building with `MODERN=1` you’ll get **pokeemerald.gba** (expansion keeps the same filename; the build mode is reflected in the map/compile flags).
 3. API:
 
    ```bash

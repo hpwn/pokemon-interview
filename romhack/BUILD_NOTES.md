@@ -38,7 +38,8 @@ make tools -j$(nproc)
 make MODERN=1 -j$(nproc)
 ```
 
-The finished ROM is written to `romhack/pokeemerald-expansion/pokeemerald.gba`.
+Expect output: pokeemerald.gba (written to `romhack/pokeemerald-expansion/pokeemerald.gba`).
+Note: In `rh-hideout/pokeemerald-expansion`, `MODERN=1` controls compiler/toolchain flags but does not change the ROM filename.
 
 ## Known gotchas
 

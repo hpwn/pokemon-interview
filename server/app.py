@@ -31,6 +31,11 @@ ORDER = [p["id"] for p in DATA]
 
 app = FastAPI()
 
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
+
 def append_log(line: str) -> None:
     log_dir = Path.home() / "pokemon-career" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)

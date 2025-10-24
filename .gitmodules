@@ -1,4 +1,4 @@
-[submodule "romhack/pokeemerald"]
-	path = romhack/pokeemerald
+[submodule "romhack/pokeemerald-expansion"]
+	path = romhack/pokeemerald-expansion
 	url = https://github.com/rh-hideout/pokeemerald-expansion.git
 	ignore = dirty

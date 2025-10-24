@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.."; pwd)"
 SRC="$ROOT/romhack/overrides"
-DST="$ROOT/romhack/pokeemerald"
+DST="$ROOT/romhack/pokeemerald-expansion"
 
 rsync -av --exclude='.git' "$SRC/" "$DST/"
 echo "Overrides applied to submodule."
